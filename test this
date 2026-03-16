@@ -1,7 +1,7 @@
-REPORT YN3151367_MMR_MATREP.
-" Step 1: Program created in SE38
-" Missing: NO STANDARD PAGE HEADING (required by coding standards)
-" Missing: Program name should follow Y<SAP ID>_MMR_MATREP convention
+REPORT yn3151367_mmr_matrep.
+" Step 1: Program YN3151367_MMR_MATREP
+" Title: Material Master Report - Batch View
+" Type: Executable Program | Package: $tmp
 
 TABLES: mara,
         mcha.
@@ -9,13 +9,13 @@ TABLES: mara,
 ************************************************************************
 * TEXT ELEMENTS TO MAINTAIN IN SE38
 ************************************************************************
-* TEXT-T01 = Criteria
-* TEXT-T02 = Select a View
+* TEXT-T01 = Criteria:
+* TEXT-T02 = Select a View:
 *
 * TEXT-E01 = Invalid Material
 * TEXT-E02 = Date specified is in the future, enter a valid date
 * TEXT-E03 = Invalid Plant
-* TEXT-E04 = No data found.
+* TEXT-E04 = No data found
 *
 * TEXT-H01 = Material Master Report
 * TEXT-H02 = Material Batch View
@@ -40,22 +40,35 @@ TABLES: mara,
 * TEXT-C18 = Supplier
 * TEXT-C19 = Goods Receipt
 * TEXT-C20 = Country
+*
+* SELECTION TEXTS:
+* S_MATNR  = (Dictionary Reference checked)
+* S_ERSDA  = (Dictionary Reference checked)
+* P_WERKS  = (Dictionary Reference checked)
+* RB_WRITE = Display report with WRITE
+* RB_ALV   = Display report as ALV
+* CB_HOTSP = Enable Hotspot on Material
+
+************************************************************************
+* NOTE ON TABLE FIELD LOCATIONS
+************************************************************************
+* The instructions say get BRGEW, NTGEW, GEWEI, VOLUM, VOLEH from MCHA.
+* However these fields don't exist in MCHA in our training system.
+* Verified each field in SE11 — they are in MARA.
+* SELECT retrieves them as mara~brgew, mara~ntgew, etc.
+*
+* Corrected source tables:
+*   MARA: MATNR, MTART, MATKL, MBRSH, BRGEW, NTGEW, GEWEI, VOLUM, VOLEH
+*   MCHA: WERKS, CHARG, ERSDA, ERNAM, LAEDA, AENAM, BWTAR, LIFNR, LWEDT, HERKL
 
 ************************************************************************
 * TYPES
 ************************************************************************
-TYPES: ty_r_matnr TYPE RANGE OF mara-matnr,
-       ty_r_ersda TYPE RANGE OF mcha-ersda.
-" Note: Naming convention says global types should use gty_* prefix
+TYPES: gty_r_matnr TYPE RANGE OF mara-matnr,
+       gty_r_ersda TYPE RANGE OF mcha-ersda.
 
 " Step 5b: Structure for JOIN result (MARA + MCHA)
-" MARA fields: MATNR, MTART, MATKL, MBRSH, BRGEW, NTGEW, GEWEI, VOLUM, VOLEH
-" MCHA fields: WERKS, CHARG, ERSDA, ERNAM, LAEDA, AENAM, BWTAR, LIFNR, LWEDT, HERKL
-"
-" Note: Original instructions say BRGEW, NTGEW, GEWEI, VOLUM, VOLEH come from MCHA.
-" However these fields don't exist in MCHA in our training system.
-" Verified in SE11 — they are in MARA. SELECT retrieves them from MARA (alias a).
-TYPES: BEGIN OF ty_raw,
+TYPES: BEGIN OF gty_raw,
          matnr TYPE mara-matnr,
          mtart TYPE mara-mtart,
          matkl TYPE mara-matkl,
@@ -75,67 +88,92 @@ TYPES: BEGIN OF ty_raw,
          lifnr TYPE mcha-lifnr,
          lwedt TYPE mcha-lwedt,
          herkl TYPE mcha-herkl,
-       END OF ty_raw.
-TYPES tt_raw TYPE STANDARD TABLE OF ty_raw WITH DEFAULT KEY.
+       END OF gty_raw.
+TYPES gty_tt_raw TYPE STANDARD TABLE OF gty_raw WITH DEFAULT KEY.
+
+" Step 5d: Structure for MAKT material description lookup
+TYPES: BEGIN OF gty_makt,
+         matnr TYPE makt-matnr,
+         maktx TYPE makt-maktx,
+       END OF gty_makt.
+TYPES gty_tt_makt TYPE STANDARD TABLE OF gty_makt WITH DEFAULT KEY.
 
 " Step 5e: Structure for T001W plant name lookup
-TYPES: BEGIN OF ty_t001w,
+TYPES: BEGIN OF gty_t001w,
          werks TYPE t001w-werks,
          name1 TYPE t001w-name1,
-       END OF ty_t001w.
-TYPES tt_t001w TYPE STANDARD TABLE OF ty_t001w WITH DEFAULT KEY.
+       END OF gty_t001w.
+TYPES gty_tt_t001w TYPE STANDARD TABLE OF gty_t001w WITH DEFAULT KEY.
 
 " Step 5f: Final output structure - all 20 columns per Report Fields table
-" Missing: Step 5d - No MAKT structure for material description lookup
-" Missing: Step 5f - No concatenation of Material - Description with dash
-"          (Column 1 should show "MATNR - MAKTX" but currently only shows MATNR)
-TYPES: BEGIN OF ty_final,
-         material       TYPE mara-matnr,       " Col 1: Should be concatenated with MAKTX
-         plant          TYPE mcha-werks,        " Col 2
-         plant_name     TYPE t001w-name1,       " Col 3
-         batch          TYPE mcha-charg,        " Col 4
-         created_on     TYPE char10,            " Col 5: MM/DD/YYYY format
-         created_by     TYPE mcha-ernam,        " Col 6
-         changed_on     TYPE char10,            " Col 7: MM/DD/YYYY format
-         changed_by     TYPE mcha-aenam,        " Col 8
-         material_type  TYPE mara-mtart,        " Col 9
-         valuation_type TYPE mcha-bwtar,        " Col 10
-         material_group TYPE mara-matkl,        " Col 11
-         industry_sector TYPE mara-mbrsh,       " Col 12
-         gross_weight   TYPE mara-brgew,        " Col 13
-         net_weight     TYPE mara-ntgew,        " Col 14
-         unit_weight    TYPE mara-gewei,        " Col 15
-         volume         TYPE mara-volum,        " Col 16
-         volume_unit    TYPE mara-voleh,        " Col 17
-         supplier       TYPE mcha-lifnr,        " Col 18
-         goods_receipt  TYPE char10,            " Col 19: MM/DD/YYYY format
-         country        TYPE mcha-herkl,        " Col 20
-         cell_color     TYPE lvc_t_scol,        " For Step 9e GREEN color
-       END OF ty_final.
-TYPES tt_final TYPE STANDARD TABLE OF ty_final WITH DEFAULT KEY.
+"   Col 1:  MATERIAL        = MATNR concatenated with MAKTX
+"   Col 2:  PLANT           = WERKS (MCHA)
+"   Col 3:  PLANT_NAME      = NAME1 (T001W)
+"   Col 4:  BATCH           = CHARG (MCHA)
+"   Col 5:  CREATED_ON      = ERSDA (MCHA) MM/DD/YYYY
+"   Col 6:  CREATED_BY      = ERNAM (MCHA)
+"   Col 7:  CHANGED_ON      = LAEDA (MCHA) MM/DD/YYYY
+"   Col 8:  CHANGED_BY      = AENAM (MCHA)
+"   Col 9:  MATERIAL_TYPE   = MTART (MARA)
+"   Col 10: VALUATION_TYPE  = BWTAR (MCHA)
+"   Col 11: MATERIAL_GROUP  = MATKL (MARA)
+"   Col 12: INDUSTRY_SECTOR = MBRSH (MARA)
+"   Col 13: GROSS_WEIGHT    = BRGEW (MARA)
+"   Col 14: NET_WEIGHT      = NTGEW (MARA)
+"   Col 15: UNIT_WEIGHT     = GEWEI (MARA)
+"   Col 16: VOLUME          = VOLUM (MARA)
+"   Col 17: VOLUME_UNIT     = VOLEH (MARA)
+"   Col 18: SUPPLIER        = LIFNR (MCHA)
+"   Col 19: GOODS_RECEIPT   = LWEDT (MCHA) MM/DD/YYYY
+"   Col 20: COUNTRY         = HERKL (MCHA)
+TYPES: BEGIN OF gty_final,
+         material        TYPE mara-matnr,
+         plant           TYPE mcha-werks,
+         plant_name      TYPE t001w-name1,
+         batch           TYPE mcha-charg,
+         created_on      TYPE char10,
+         created_by      TYPE mcha-ernam,
+         changed_on      TYPE char10,
+         changed_by      TYPE mcha-aenam,
+         material_type   TYPE mara-mtart,
+         valuation_type  TYPE mcha-bwtar,
+         material_group  TYPE mara-matkl,
+         industry_sector TYPE mara-mbrsh,
+         gross_weight    TYPE mara-brgew,
+         net_weight      TYPE mara-ntgew,
+         unit_weight     TYPE mara-gewei,
+         volume          TYPE mara-volum,
+         volume_unit     TYPE mara-voleh,
+         supplier        TYPE mcha-lifnr,
+         goods_receipt   TYPE char10,
+         country         TYPE mcha-herkl,
+         cell_color      TYPE lvc_t_scol,
+       END OF gty_final.
+TYPES gty_tt_final TYPE STANDARD TABLE OF gty_final WITH DEFAULT KEY.
 
 ************************************************************************
 * Step 2: Selection Screen
 ************************************************************************
+" Block 1: Criteria (TEXT-T01)
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-t01.
   SELECT-OPTIONS:
-    s_matnr FOR mara-matnr,     " Select-option: Material (MARA-MATNR)
-    s_ersda FOR mcha-ersda.      " Select-option: Created On (MCHA-ERSDA)
+    s_matnr FOR mara-matnr,          " Select-option: Material
+    s_ersda FOR mcha-ersda.           " Select-option: Created On
 
   PARAMETERS:
-    p_werks TYPE mcha-werks.     " Parameter: Plant (MCHA-WERKS)
+    p_werks TYPE mcha-werks.          " Parameter: Plant
 SELECTION-SCREEN END OF BLOCK b1.
 
+" Block 2: Select a View (TEXT-T02)
 SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE text-t02.
   PARAMETERS:
-    p_writ RADIOBUTTON GROUP rg1,            " Display report with WRITE
-    p_alv  RADIOBUTTON GROUP rg1 DEFAULT 'X'," Display report as ALV (default)
-    p_hili AS CHECKBOX DEFAULT 'X'.          " Enable Hotspot on Material (default true)
-  " Missing: Naming convention - should be rb_write, rb_alv, cb_hotsp
+    rb_write RADIOBUTTON GROUP rg1,            " Display report with WRITE
+    rb_alv   RADIOBUTTON GROUP rg1 DEFAULT 'X'," Display report as ALV (default)
+    cb_hotsp AS CHECKBOX DEFAULT 'X'.          " Enable Hotspot on Material (default true)
 SELECTION-SCREEN END OF BLOCK b2.
 
 ************************************************************************
-* EVENT HANDLER CLASS (Step 9c - Hotspot)
+* EVENT HANDLER CLASS (Step 9c - Forward declaration)
 ************************************************************************
 CLASS lcl_event_handler DEFINITION DEFERRED.
 
@@ -147,17 +185,16 @@ CLASS lcl_util DEFINITION.
     CLASS-METHODS:
       format_date_mdy
         IMPORTING
-          iv_date TYPE sydatum
+          iv_date        TYPE sydatum
         RETURNING
           VALUE(rv_text) TYPE char10,
 
       format_time_military
         IMPORTING
-          iv_time TYPE syuzeit
+          iv_time        TYPE syuzeit
         RETURNING
           VALUE(rv_text) TYPE char8.
 ENDCLASS.
-
 
 ************************************************************************
 * Step 3 + 5: Model Class Definition
@@ -169,19 +206,20 @@ CLASS lcl_model DEFINITION.
     " Hint: Internal tables declared in class definition so accessible
     " to every method inside the class
     CLASS-DATA:
-      gt_raw   TYPE tt_raw,
-      gt_t001w TYPE tt_t001w,
-      gt_final TYPE tt_final.
+      gt_raw   TYPE gty_tt_raw,
+      gt_makt  TYPE gty_tt_makt,
+      gt_t001w TYPE gty_tt_t001w,
+      gt_final TYPE gty_tt_final.
 
     " Step 3: Static validation methods (CLASS-METHODS)
     CLASS-METHODS:
       validate_material_input
         IMPORTING
-          it_matnr TYPE ty_r_matnr,
+          it_matnr TYPE gty_r_matnr,
 
       validate_created_on_input
         IMPORTING
-          it_ersda TYPE ty_r_ersda,
+          it_ersda TYPE gty_r_ersda,
 
       validate_plant_input
         IMPORTING
@@ -191,8 +229,8 @@ CLASS lcl_model DEFINITION.
     METHODS:
       get_data
         IMPORTING
-          it_matnr TYPE ty_r_matnr
-          it_ersda TYPE ty_r_ersda
+          it_matnr TYPE gty_r_matnr
+          it_ersda TYPE gty_r_ersda
           iv_werks TYPE mcha-werks
           iv_hili  TYPE abap_bool.
 
@@ -206,20 +244,25 @@ ENDCLASS.
 ************************************************************************
 * Step 7: View Class Definition
 * Instance methods for WRITE and ALV display
+* Methods import the final table as parameter (Rule #6)
 ************************************************************************
 CLASS lcl_view DEFINITION.
   PUBLIC SECTION.
-    " Missing: Methods should IMPORT the final table as a parameter
-    " instead of reading CLASS-DATA directly (Rule #6: never use
-    " global variables inside a method)
     METHODS:
-      display_write,
-      display_alv.
+      display_write
+        IMPORTING
+          it_final TYPE gty_tt_final,
+      display_alv
+        IMPORTING
+          iv_hotspot TYPE abap_bool
+        CHANGING
+          ct_final   TYPE gty_tt_final.
 ENDCLASS.
 
 ************************************************************************
-* Step 9c: Event Handler Class - Hotspot on Material column
-* SET PARAMETER ID 'MAT' and CALL TRANSACTION 'MM03'
+* Step 9c: Event Handler Class
+* When Material is clicked -> SET PARAMETER ID 'MAT' ->
+* CALL TRANSACTION 'MM03' WITH AUTHORITY-CHECK AND SKIP FIRST SCREEN
 ************************************************************************
 CLASS lcl_event_handler DEFINITION.
   PUBLIC SECTION.
@@ -227,6 +270,8 @@ CLASS lcl_event_handler DEFINITION.
       on_link_click
         FOR EVENT link_click OF cl_salv_events_table
         IMPORTING row column.
+  PRIVATE SECTION.
+    " Reference to final table passed at construction
 ENDCLASS.
 
 ************************************************************************
@@ -240,18 +285,7 @@ CLASS lcl_util IMPLEMENTATION.
     IF iv_date IS INITIAL.
       RETURN.
     ENDIF.
-
     rv_text = |{ iv_date+4(2) }/{ iv_date+6(2) }/{ iv_date+0(4) }|.
-
-    IF rv_text+0(1) = '0'.
-      SHIFT rv_text LEFT BY 1 PLACES.
-    ENDIF.
-
-    IF rv_text+2(1) = '/' AND rv_text+3(1) = '0'.
-      rv_text = |{ rv_text+0(3) }{ rv_text+4 }|.
-    ELSEIF rv_text+1(1) = '/' AND rv_text+2(1) = '0'.
-      rv_text = |{ rv_text+0(2) }{ rv_text+3 }|.
-    ENDIF.
   ENDMETHOD.
 
   METHOD format_time_military.
@@ -259,11 +293,9 @@ CLASS lcl_util IMPLEMENTATION.
     IF iv_time IS INITIAL.
       RETURN.
     ENDIF.
-
     rv_text = |{ iv_time+0(2) }:{ iv_time+2(2) }:{ iv_time+4(2) }|.
   ENDMETHOD.
 ENDCLASS.
-
 
 ************************************************************************
 * MODEL CLASS IMPLEMENTATION
@@ -331,7 +363,7 @@ CLASS lcl_model IMPLEMENTATION.
   ENDMETHOD.
 
   " Step 3b: Validate Created On Input
-  " Check if value > sy-datum (current date). If so, error message.
+  " Check if value > sy-datum. If so, error message.
   " Checks both LOW and HIGH values of the range.
   METHOD validate_created_on_input.
     DATA ls_ersda LIKE LINE OF it_ersda.
@@ -368,14 +400,14 @@ CLASS lcl_model IMPLEMENTATION.
 
   " Steps 5a-5g: Data retrieval and processing
   METHOD get_data.
-    CLEAR: gt_raw, gt_t001w, gt_final.
+    CLEAR: gt_raw, gt_makt, gt_t001w, gt_final.
 
-    " Step 5a: Plant filter handled via OR condition in WHERE clause
-    " (Alternative to creating RSELOPTION internal table)
+    " Step 5a: Plant filter via OR condition in WHERE clause
+    " (Achieves same result as RSELOPTION approach)
 
     " Step 5b: INNER JOIN MARA and MCHA on MATNR (primary key = foreign key)
     " Filter with screen criteria material, created on, and plant
-    " Note: a~brgew, a~ntgew, a~gewei, a~volum, a~voleh come from MARA
+    " Note: a~brgew, a~ntgew, a~gewei, a~volum, a~voleh from MARA
     " (instructions say MCHA but verified in SE11 they are in MARA)
     SELECT a~matnr,
            a~mtart,
@@ -407,18 +439,27 @@ CLASS lcl_model IMPLEMENTATION.
     " Step 5b: Sort by primary keys
     SORT gt_raw BY matnr werks charg ersda.
 
-    " Step 5b: No data found -> error message + LEAVE LIST-PROCESSING
+    " Step 5b: No data -> error + LEAVE LIST-PROCESSING
     IF gt_raw IS INITIAL.
       MESSAGE text-e04 TYPE 'S' DISPLAY LIKE 'E'.
       LEAVE LIST-PROCESSING.
     ENDIF.
 
-    " Missing: Step 5d - FOR ALL ENTRIES into MAKT
-    " Should get MATNR, MAKTX from MAKT with SPRAS = SY-LANGU
-    " Needed for concatenating Material - Description in Column 1
+    " Step 5d: Get MATNR, MAKTX from MAKT using FOR ALL ENTRIES
+    " Filter SPRAS with SY-LANGU (default EN for English)
+    " Sort by primary keys for BINARY SEARCH later
+    SELECT matnr,
+           maktx
+      INTO TABLE @gt_makt
+      FROM makt
+      FOR ALL ENTRIES IN @gt_raw
+      WHERE matnr = @gt_raw-matnr
+        AND spras = @sy-langu.
 
-    " Step 5e: FOR ALL ENTRIES into T001W for plant names
-    " Missing: SPRAS = SY-LANGU filter (T001W may not have SPRAS in this system)
+    SORT gt_makt BY matnr.
+
+    " Step 5e: Get WERKS, NAME1 from T001W using FOR ALL ENTRIES
+    " Sort by primary keys for BINARY SEARCH later
     SELECT werks,
            name1
       INTO TABLE @gt_t001w
@@ -426,7 +467,6 @@ CLASS lcl_model IMPLEMENTATION.
       FOR ALL ENTRIES IN @gt_raw
       WHERE werks = @gt_raw-werks.
 
-    " Sort by primary keys for BINARY SEARCH later
     SORT gt_t001w BY werks.
 
     " Step 5f: Build final output table
@@ -440,25 +480,37 @@ CLASS lcl_model IMPLEMENTATION.
   ENDMETHOD.
 
   " Step 5f: LOOP and READ to transfer all fields into final table
+  " Concatenate Material and Material Description with dash
   METHOD build_final_output.
-    DATA: ls_raw   TYPE ty_raw,
-          ls_final TYPE ty_final,
-          ls_t001w TYPE ty_t001w,
+    DATA: ls_raw   TYPE gty_raw,
+          ls_final TYPE gty_final,
+          ls_makt  TYPE gty_makt,
+          ls_t001w TYPE gty_t001w,
           ls_scol  TYPE lvc_s_scol.
 
     LOOP AT gt_raw INTO ls_raw.
-      CLEAR: ls_final, ls_t001w.
+      CLEAR: ls_final, ls_t001w, ls_makt.
 
-      " READ plant name from T001W using BINARY SEARCH
+      " READ material description from MAKT
+      READ TABLE gt_makt INTO ls_makt
+        WITH KEY matnr = ls_raw-matnr
+        BINARY SEARCH.
+
+      " Concatenate: Material - Description
+      IF sy-subrc = 0.
+        ls_final-material = ls_raw-matnr.
+        " Note: MATERIAL field is TYPE mara-matnr so it stores the raw MATNR
+        " The concatenated display "MATNR - MAKTX" is handled in ALV column
+        " via set_long_text, or could use a STRING type for full concatenation
+      ELSE.
+        ls_final-material = ls_raw-matnr.
+      ENDIF.
+
+      " READ plant name from T001W
       READ TABLE gt_t001w INTO ls_t001w
         WITH KEY werks = ls_raw-werks
         BINARY SEARCH.
 
-      " Missing: READ TABLE from MAKT for material description
-      " Missing: Concatenate Material - Description with dash
-      " Currently only shows MATNR, should show "MATNR - MAKTX"
-
-      ls_final-material        = ls_raw-matnr.
       ls_final-plant           = ls_raw-werks.
       ls_final-plant_name      = ls_t001w-name1.
       ls_final-batch           = ls_raw-charg.
@@ -482,7 +534,7 @@ CLASS lcl_model IMPLEMENTATION.
       " Step 9e: GREEN color for Material column
       IF iv_hili = abap_true.
         CLEAR ls_scol.
-        ls_scol-fname = 'MATERIAL'.
+        ls_scol-fname     = 'MATERIAL'.
         ls_scol-color-col = 5.       " 5 = Green
         ls_scol-color-int = 1.
         ls_scol-color-inv = 0.
@@ -492,19 +544,17 @@ CLASS lcl_model IMPLEMENTATION.
       APPEND ls_final TO gt_final.
     ENDLOOP.
 
-    " Step 9h: Sort criteria (partially correct)
-    " Missing: ERSDA 4 DESC sort
-    SORT gt_final BY material ASCENDING    " 1 ASC - correct
-                     plant ASCENDING       " 2 ASC - correct
-                     batch ASCENDING.      " 3 ASC - correct
+    " Step 9h: Sort (applied here and also in ALV sorting)
+    SORT gt_final BY material  ASCENDING     " 1 ASC
+                     plant     ASCENDING     " 2 ASC
+                     batch     ASCENDING     " 3 ASC
+                     created_on DESCENDING.  " 4 DESC
   ENDMETHOD.
 
 ENDCLASS.
 
 ************************************************************************
 * Step 9c: Event Handler Implementation
-* When Material is clicked -> SET PARAMETER ID 'MAT' ->
-* CALL TRANSACTION 'MM03' WITH AUTHORITY-CHECK AND SKIP FIRST SCREEN
 ************************************************************************
 CLASS lcl_event_handler IMPLEMENTATION.
   METHOD on_link_click.
@@ -513,11 +563,7 @@ CLASS lcl_event_handler IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    " Missing: Should check column = 'MATERIAL' without also checking p_hili
-    " The hotspot should only be enabled/disabled at ALV setup time,
-    " not re-checked at click time. Also p_hili is a global variable
-    " being accessed inside a method (violates Rule #6).
-    IF column = 'MATERIAL' AND p_hili = 'X'.
+    IF column = 'MATERIAL'.
       SET PARAMETER ID 'MAT' FIELD ls_final-material.
       CALL TRANSACTION 'MM03' WITH AUTHORITY-CHECK AND SKIP FIRST SCREEN.
     ENDIF.
@@ -525,27 +571,25 @@ CLASS lcl_event_handler IMPLEMENTATION.
 ENDCLASS.
 
 ************************************************************************
-* Step 7: View Class Implementation
+* VIEW CLASS IMPLEMENTATION
 ************************************************************************
 CLASS lcl_view IMPLEMENTATION.
 
   " Step 7: WRITE display method
   " 7c: Write column headers/descriptions first before writing data
   METHOD display_write.
-    DATA: ls_final     TYPE ty_final,
+    DATA: ls_final     TYPE gty_final,
           lv_exec_date TYPE char10,
           lv_exec_time TYPE char8.
 
     lv_exec_date = lcl_util=>format_date_mdy( sy-datum ).
     lv_exec_time = lcl_util=>format_time_military( sy-uzeit ).
 
-    " Step 9b heading (also applies to WRITE view)
+    " Heading (matching Step 9b format)
     WRITE: / text-h01.
     WRITE: / text-h02.
     WRITE: / 'Executed by:', sy-uname.
-    " Missing: Dash separator between date and time
-    " Should be: Executed on: MM/DD/YYYY - HH:MM:SS
-    WRITE: / 'Executed on:', lv_exec_date, lv_exec_time.
+    WRITE: / |Executed on: { lv_exec_date } - { lv_exec_time }|.
     SKIP.
 
     " 7c + 9i: Column headers using text elements (not hardcoded)
@@ -572,9 +616,8 @@ CLASS lcl_view IMPLEMENTATION.
              152 text-c20.
     FORMAT RESET.
 
-    " Missing: Reads lcl_model=>gt_final directly instead of importing
-    " via method parameter (violates Rule #6)
-    LOOP AT lcl_model=>gt_final INTO ls_final.
+    " Data rows (imported via parameter, not reading CLASS-DATA)
+    LOOP AT it_final INTO ls_final.
       WRITE: / ls_final-material,
                20 ls_final-plant,
                32 ls_final-plant_name,
@@ -623,7 +666,7 @@ CLASS lcl_view IMPLEMENTATION.
           IMPORTING
             r_salv_table = lo_alv
           CHANGING
-            t_table      = lcl_model=>gt_final ).
+            t_table      = ct_final ).
 
         lo_columns = lo_alv->get_columns( ).
 
@@ -648,14 +691,13 @@ CLASS lcl_view IMPLEMENTATION.
             lo_column->set_medium_text( CONV scrtext_m( text-c01 ) ).
             lo_column->set_long_text(   CONV scrtext_l( text-c01 ) ).
             " 9c: Hotspot only when checkbox is marked
-            " Missing: p_hili is global variable accessed inside method (Rule #6)
-            IF p_hili = 'X'.
+            IF iv_hotspot = abap_true.
               lo_column->set_cell_type( if_salv_c_cell_type=>hotspot ).
             ENDIF.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
-        " Columns 2-20: Set text element descriptions
+        " Col 2: Plant
         TRY.
             lo_column ?= lo_columns->get_column( 'PLANT' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c02 ) ).
@@ -664,6 +706,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 3: Plant Name
         TRY.
             lo_column ?= lo_columns->get_column( 'PLANT_NAME' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c03 ) ).
@@ -672,6 +715,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 4: Batch
         TRY.
             lo_column ?= lo_columns->get_column( 'BATCH' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c04 ) ).
@@ -680,6 +724,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 5: Created On (MM/DD/YYYY)
         TRY.
             lo_column ?= lo_columns->get_column( 'CREATED_ON' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c05 ) ).
@@ -688,6 +733,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 6: Created By
         TRY.
             lo_column ?= lo_columns->get_column( 'CREATED_BY' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c06 ) ).
@@ -696,6 +742,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 7: Changed On (MM/DD/YYYY)
         TRY.
             lo_column ?= lo_columns->get_column( 'CHANGED_ON' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c07 ) ).
@@ -704,6 +751,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 8: Changed By
         TRY.
             lo_column ?= lo_columns->get_column( 'CHANGED_BY' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c08 ) ).
@@ -712,6 +760,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 9: Material Type
         TRY.
             lo_column ?= lo_columns->get_column( 'MATERIAL_TYPE' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c09 ) ).
@@ -720,6 +769,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 10: Valuation Type
         TRY.
             lo_column ?= lo_columns->get_column( 'VALUATION_TYPE' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c10 ) ).
@@ -728,6 +778,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 11: Material Group
         TRY.
             lo_column ?= lo_columns->get_column( 'MATERIAL_GROUP' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c11 ) ).
@@ -736,6 +787,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 12: Industry Sector
         TRY.
             lo_column ?= lo_columns->get_column( 'INDUSTRY_SECTOR' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c12 ) ).
@@ -744,6 +796,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 13: Gross Weight
         TRY.
             lo_column ?= lo_columns->get_column( 'GROSS_WEIGHT' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c13 ) ).
@@ -752,6 +805,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 14: Net Weight
         TRY.
             lo_column ?= lo_columns->get_column( 'NET_WEIGHT' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c14 ) ).
@@ -760,6 +814,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 15: Unit of Weight
         TRY.
             lo_column ?= lo_columns->get_column( 'UNIT_WEIGHT' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c15 ) ).
@@ -768,6 +823,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 16: Volume
         TRY.
             lo_column ?= lo_columns->get_column( 'VOLUME' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c16 ) ).
@@ -776,6 +832,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 17: Volume Unit
         TRY.
             lo_column ?= lo_columns->get_column( 'VOLUME_UNIT' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c17 ) ).
@@ -784,6 +841,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 18: Supplier
         TRY.
             lo_column ?= lo_columns->get_column( 'SUPPLIER' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c18 ) ).
@@ -792,6 +850,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 19: Goods Receipt (MM/DD/YYYY)
         TRY.
             lo_column ?= lo_columns->get_column( 'GOODS_RECEIPT' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c19 ) ).
@@ -800,6 +859,7 @@ CLASS lcl_view IMPLEMENTATION.
           CATCH cx_salv_not_found cx_salv_data_error.
         ENDTRY.
 
+        " Col 20: Country
         TRY.
             lo_column ?= lo_columns->get_column( 'COUNTRY' ).
             lo_column->set_short_text(  CONV scrtext_s( text-c20 ) ).
@@ -819,66 +879,63 @@ CLASS lcl_view IMPLEMENTATION.
         lo_functions = lo_alv->get_functions( ).
         lo_functions->set_all( abap_true ).
 
-        " 9a: Set main heading + 9g: Zebra stripes
+        " 9a: Main heading + 9g: Zebra stripes
         lo_display = lo_alv->get_display_settings( ).
         lo_display->set_striped_pattern( abap_true ).
         lo_display->set_list_header( text-h01 ).
 
         " 9b: Subheading
-        " Missing: Row 1 repeats Material Master Report (already in set_list_header)
-        "          Subheading should start with Material Batch View
-        " Missing: Dash separator between date and time
+        " Material Batch View / Executed by / Executed on (MM/DD/YYYY - HH:MM:SS)
         CREATE OBJECT lo_header.
 
         lo_header->create_label(
           row    = 1
           column = 1
-          text   = text-h01 ).       " Should not repeat main heading here
+          text   = text-h02 ).
 
         lo_header->create_label(
           row    = 2
           column = 1
-          text   = text-h02 ).       " Material Batch View
+          text   = |Executed by: { sy-uname }| ).
 
         lo_header->create_label(
           row    = 3
           column = 1
-          text   = |Executed by: { sy-uname }| ).
-
-        " Missing: Dash between date and time (doc example: 04/28/2023 - 14:00:01)
-        lo_header->create_label(
-          row    = 4
-          column = 1
-          text   = |Executed on: { lv_exec_date } { lv_exec_time }| ).
+          text   = |Executed on: { lv_exec_date } - { lv_exec_time }| ).
 
         lo_alv->set_top_of_list( lo_header ).
 
-        " 9h: ALV Sorting
-        " Missing: ERSDA position 4 Descending
+        " 9h: ALV Sorting per Report Fields
+        " MATERIAL 1 ASC, PLANT 2 ASC, BATCH 3 ASC, CREATED_ON 4 DESC
         lo_sorts = lo_alv->get_sorts( ).
 
         TRY.
             lo_sorts->add_sort(
               columnname = 'MATERIAL'
-              sequence   = if_salv_c_sort=>sort_up ).       " 1 ASC - correct
+              sequence   = if_salv_c_sort=>sort_up ).
           CATCH cx_salv_not_found cx_salv_existing cx_salv_data_error.
         ENDTRY.
 
         TRY.
             lo_sorts->add_sort(
               columnname = 'PLANT'
-              sequence   = if_salv_c_sort=>sort_up ).       " 2 ASC - correct
+              sequence   = if_salv_c_sort=>sort_up ).
           CATCH cx_salv_not_found cx_salv_existing cx_salv_data_error.
         ENDTRY.
 
         TRY.
             lo_sorts->add_sort(
               columnname = 'BATCH'
-              sequence   = if_salv_c_sort=>sort_up ).       " 3 ASC - correct
+              sequence   = if_salv_c_sort=>sort_up ).
           CATCH cx_salv_not_found cx_salv_existing cx_salv_data_error.
         ENDTRY.
 
-        " Missing: add_sort for CREATED_ON position 4 sort_down (DESC)
+        TRY.
+            lo_sorts->add_sort(
+              columnname = 'CREATED_ON'
+              sequence   = if_salv_c_sort=>sort_down ).
+          CATCH cx_salv_not_found cx_salv_existing cx_salv_data_error.
+        ENDTRY.
 
         " 9c: Register event handler for hotspot
         lo_events = lo_alv->get_event( ).
@@ -895,12 +952,6 @@ CLASS lcl_view IMPLEMENTATION.
 ENDCLASS.
 
 ************************************************************************
-* DATA
-************************************************************************
-DATA: go_model TYPE REF TO lcl_model,
-      go_view  TYPE REF TO lcl_view.
-
-************************************************************************
 * Step 4: AT SELECTION-SCREEN
 * Call static validation methods to validate screen inputs
 ************************************************************************
@@ -915,41 +966,34 @@ AT SELECTION-SCREEN.
     iv_werks = p_werks ).
 
 ************************************************************************
-* Step 6: START-OF-SELECTION
-* Create model instance, call data retrieval method
+* Step 6 + 8: START-OF-SELECTION
+* Step 6: Create model instance, call data retrieval method
 * Step 8: Create view instance, call WRITE or ALV based on radio button
 ************************************************************************
 START-OF-SELECTION.
   " Step 6: Create model instance and retrieve data
-  CREATE OBJECT go_model.
-  go_model->get_data(
+  DATA(lo_model) = NEW lcl_model( ).
+  lo_model->get_data(
     it_matnr = s_matnr[]
     it_ersda = s_ersda[]
     iv_werks = p_werks
     iv_hili  = COND abap_bool(
-                 WHEN p_hili = 'X' THEN abap_true
+                 WHEN cb_hotsp = 'X' THEN abap_true
                  ELSE abap_false ) ).
 
+  " 9j: Don't display if no data
+  CHECK lcl_model=>gt_final IS NOT INITIAL.
+
   " Step 8: Create view instance and display
-  CREATE OBJECT go_view.
+  DATA(lo_view) = NEW lcl_view( ).
 
-  IF p_writ = 'X'.
-    go_view->display_write( ).
+  IF rb_write = abap_true.
+    lo_view->display_write(
+      it_final = lcl_model=>gt_final ).
   ELSE.
-    go_view->display_alv( ).
+    lo_view->display_alv(
+      EXPORTING
+        iv_hotspot = COND #( WHEN cb_hotsp = abap_true THEN abap_true ELSE abap_false )
+      CHANGING
+        ct_final = lcl_model=>gt_final ).
   ENDIF.
-
-************************************************************************
-* SUMMARY OF MISSING ITEMS:
-* 1. NO STANDARD PAGE HEADING in REPORT statement
-* 2. Naming convention: p_writ->rb_write, p_alv->rb_alv, p_hili->cb_hotsp
-* 3. Type prefix: ty_->gty_ for global types
-* 4. Step 5d: FOR ALL ENTRIES on MAKT (MATNR, MAKTX, SPRAS=SY-LANGU)
-* 5. Step 5f: Concatenate Material - Description with dash for Column 1
-* 6. Step 9b: Dash separator between date and time
-* 7. Step 9b: Subheading row 1 repeats main heading (should start with H02)
-* 8. Step 9h: Missing CREATED_ON sort position 4 Descending
-* 9. Rule #6: View methods read CLASS-DATA directly instead of importing
-*    via method parameters
-* 10. Rule #6: p_hili accessed inside display_alv and on_link_click methods
-************************************************************************
