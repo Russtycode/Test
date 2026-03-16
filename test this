@@ -82,8 +82,8 @@ TYPES: BEGIN OF gty_raw,
          charg TYPE mcha-charg,
          ersda TYPE mcha-ersda,
          ernam TYPE mcha-ernam,
-         laeda TYPE mcha-laeda,
-         aenam TYPE mcha-aenam,
+         laeda TYPE mara-laeda,
+         aenam TYPE mara-aenam,
          bwtar TYPE mcha-bwtar,
          lifnr TYPE mcha-lifnr,
          lwedt TYPE mcha-lwedt,
@@ -418,12 +418,12 @@ CLASS lcl_model IMPLEMENTATION.
            a~gewei,
            a~volum,
            a~voleh,
+           a~laeda,
+           a~aenam,
            b~werks,
            b~charg,
            b~ersda,
            b~ernam,
-           b~laeda,
-           b~aenam,
            b~bwtar,
            b~lifnr,
            b~lwedt,
@@ -434,7 +434,7 @@ CLASS lcl_model IMPLEMENTATION.
       WHERE a~matnr IN @it_matnr
         AND b~ersda IN @it_ersda
         AND ( b~werks = @iv_werks OR @iv_werks IS INITIAL )
-      INTO TABLE @gt_raw.
+      INTO CORRESPONDING FIELDS OF TABLE @gt_raw.
 
     " Step 5b: Sort by primary keys
     SORT gt_raw BY matnr werks charg ersda.
